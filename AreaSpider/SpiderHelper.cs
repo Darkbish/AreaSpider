@@ -1,8 +1,6 @@
 ﻿using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -14,30 +12,25 @@ namespace AreaSpider
     public class SpiderHelper
     {
         private const string INDEX_URL = "http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2013/index.html";
-        private static Dictionary<string, bool> ProvinceUrl = new Dictionary<string, bool>();
-        private static Dictionary<string, bool> CitiesUrl = new Dictionary<string, bool>();
-        private static Dictionary<string, bool> CountiesUrl = new Dictionary<string, bool>();
-        private static Dictionary<string, bool> TownsUrl = new Dictionary<string, bool>();
-        private static Dictionary<string, Area> Areas = new Dictionary<string, Area>();
 
         private const string BASE_URL = "http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2013/";
+        private const int HUNDRED = 100;
+        private static Dictionary<string, Area> Areas = new Dictionary<string, Area>();
 
         public static Dictionary<string, SpiderThread> Threads = new Dictionary<string, SpiderThread>();
-        private static int finished = 0;
-        private static object locker = new object();
-        private static ConsoleColor back = Console.BackgroundColor;
-        private static ConsoleColor fore = Console.ForegroundColor;
-        private const int HUNDRED = 100;
+        private static int finished;
+        private static readonly object locker = new object();
+        private static readonly ConsoleColor back = Console.BackgroundColor;
 
-        private static IDictionary<Level, IList<string>> Failure = new Dictionary<Level, IList<string>>
+        private static readonly IDictionary<Level, IList<string>> Failure = new Dictionary<Level, IList<string>>
         {
-            {Level.Province, new List<string>() },
+            {Level.Province, new List<string>()},
             {
                 Level.City, new List<string>()
             },
-            {Level.County, new List<string>() },
-            {Level.Town, new List<string>() },
-            {Level.Village, new List<string>() }
+            {Level.County, new List<string>()},
+            {Level.Town, new List<string>()},
+            {Level.Village, new List<string>()}
         };
 
         public static async Task<string> ExportCounties(string pcode, string ccode, string cocode, string url)
@@ -53,10 +46,15 @@ namespace AreaSpider
                             {
                                 ccode, new Area
                                 {
-                                    Sub = new Dictionary<string, Area> {{cocode, new Area
+                                    Sub = new Dictionary<string, Area>
                                     {
-                                        Sub = new Dictionary<string, Area>()
-                                    } }}
+                                        {
+                                            cocode, new Area
+                                            {
+                                                Sub = new Dictionary<string, Area>()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -65,7 +63,7 @@ namespace AreaSpider
             };
 
             await LoadTowns(pcode, ccode, cocode, url);
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             Write(sb, Areas[pcode]);
             return sb.ToString();
         }
@@ -73,9 +71,19 @@ namespace AreaSpider
         public static async Task<string> Export()
         {
             await LoadProvince();
+            Console.WindowWidth = Console.LargestWindowWidth;
+            Console.WindowHeight = Console.LargestWindowHeight;
             foreach (var item in Threads)
             {
                 Console.WriteLine("{0}：", item.Value.Title);
+                Console.BackgroundColor = ConsoleColor.Cyan;
+                for (var j = 0; j < HUNDRED; j++)
+                {
+                    Console.Write(" ");
+                }
+                Console.WriteLine();
+                Console.BackgroundColor = back;
+                Console.WriteLine("Cities：");
                 Console.BackgroundColor = ConsoleColor.Cyan;
                 for (int j = 0; j < HUNDRED; j++)
                 {
@@ -83,22 +91,14 @@ namespace AreaSpider
                 }
                 Console.WriteLine();
                 Console.BackgroundColor = back;
-                //Console.WriteLine("Cities：");
-                //Console.BackgroundColor = ConsoleColor.Cyan;
-                //for (int j = 0; j < HUNDRED; j++)
-                //{
-                //    Console.Write(" ");
-                //}
-                //Console.WriteLine();
-                //Console.BackgroundColor = back;
-                //Console.WriteLine("Counties：");
-                //Console.BackgroundColor = ConsoleColor.Cyan;
-                //for (int j = 0; j < HUNDRED; j++)
-                //{
-                //    Console.Write(" ");
-                //}
-                //Console.WriteLine();
-                //Console.BackgroundColor = back;
+                Console.WriteLine("Counties：");
+                Console.BackgroundColor = ConsoleColor.Cyan;
+                for (int j = 0; j < HUNDRED; j++)
+                {
+                    Console.Write(" ");
+                }
+                Console.WriteLine();
+                Console.BackgroundColor = back;
             }
             Console.BackgroundColor = ConsoleColor.Yellow;
             foreach (var item in Threads)
@@ -112,7 +112,7 @@ namespace AreaSpider
                     Monitor.Wait(locker);
                 }
             }
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             foreach (var item in Areas)
             {
                 Write(sb, item.Value);
@@ -134,7 +134,8 @@ namespace AreaSpider
         private static void Write(StringBuilder sb, Area area)
         {
             //sb.AppendFormat("{0}\t{1}\t{2}\t{3}\n", area.Title, area.Code, area.Url, area.ParentUrl);
-            sb.AppendFormat("{0}\t{1}\n", area.Title, area.Code);
+            sb.AppendFormat("\"{0}\",\"'{1}\"", area.Title, area.Code);
+            sb.AppendLine();
             if (area.Sub != null && area.Sub.Count > 0)
             {
                 foreach (var item in area.Sub)
@@ -152,7 +153,7 @@ namespace AreaSpider
             var province =
                 doc.DocumentNode.SelectNodes(
                     "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tr[@class='provincetr']/td/a");
-            int i = 0;
+            var i = 0;
             foreach (var item in province)
             {
                 var href = item.Attributes["href"].Value;
@@ -167,7 +168,7 @@ namespace AreaSpider
                     Sub = new Dictionary<string, Area>()
                 };
                 Areas.Add(code, area);
-                Thread thread = new Thread(async () =>
+                var thread = new Thread(async () =>
                 {
                     await LoadCities(code, area.Url);
                     lock (locker)
@@ -177,16 +178,16 @@ namespace AreaSpider
                         Monitor.Pulse(locker);
                     }
                 });
-                var st = new SpiderThread { Title = title, Row = i, Thread = thread };
+                var st = new SpiderThread {Title = title, Row = i, Thread = thread};
                 Threads.Add(code, st);
-                i += 2;
+                i += 6;
             }
         }
 
         private static void Export(string code)
         {
             var area = Areas[code];
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             Write(sb, area);
             File.WriteAllText($@"D:\areas\{area.Title}.txt", sb.ToString());
         }
@@ -199,7 +200,7 @@ namespace AreaSpider
             var cities =
                 doc.DocumentNode.SelectNodes(
                     "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tr[@class='citytr']/td[position()=2]/a");
-            int i = 0;
+            var i = 0;
             if (cities != null && cities.Count > 0)
                 foreach (var item in cities)
                 {
@@ -229,20 +230,20 @@ namespace AreaSpider
                     lock (locker)
                     {
                         i++;
-                        //Console.BackgroundColor = ConsoleColor.Cyan;
-                        //for (int j = 0; j < HUNDRED; j++)
-                        //{
-                        //    Console.SetCursorPosition(j, Threads[parentCode].Row + 3);
-                        //    Console.Write(" ");
-                        //}
-                        //Console.BackgroundColor = ConsoleColor.Yellow;
-                        var length = Math.Floor((double)i / cities.Count * HUNDRED);
-                        for (int j = 0; j < length; j++)
+                        Console.BackgroundColor = ConsoleColor.Cyan;
+                        for (int j = 0; j < HUNDRED; j++)
+                        {
+                            Console.SetCursorPosition(j, Threads[parentCode].Row + 3);
+                            Console.Write(" ");
+                        }
+                        Console.BackgroundColor = ConsoleColor.Yellow;
+                        var length = Math.Floor((double) i/cities.Count*HUNDRED);
+                        for (var j = 0; j < length; j++)
                         {
                             Console.SetCursorPosition(j, Threads[parentCode].Row + 1);
                             Console.Write(" ");
                         }
-                        //Console.BackgroundColor = back;
+                        Console.BackgroundColor = back;
                     }
                 }
             else
@@ -259,11 +260,11 @@ namespace AreaSpider
                     "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tr[@class='countytr']");
 
             var baseUrl = url.Substring(0, url.LastIndexOf('/') + 1);
-            int i = 0;
+            var i = 0;
             if (counties != null && counties.Count > 0)
                 foreach (var item in counties)
                 {
-                    bool flag = false;
+                    var flag = false;
                     var a = item.SelectSingleNode("td[2]/a");
                     string href = string.Empty, code, title;
                     if (a == null)
@@ -297,24 +298,24 @@ namespace AreaSpider
                     {
                         Failure[Level.County].Add(area.Url);
                     }
-                    //lock (locker)
-                    //{
-                    //    i++;
-                    //    Console.BackgroundColor = ConsoleColor.Cyan;
-                    //    for (int j = 0; j < HUNDRED; j++)
-                    //    {
-                    //        Console.SetCursorPosition(j, Threads[pcode].Row + 5);
-                    //        Console.Write(" ");
-                    //    }
-                    //    Console.BackgroundColor = ConsoleColor.Yellow;
-                    //    var length = Math.Floor((double)i / counties.Count * HUNDRED);
-                    //    for (int j = 0; j < length; j++)
-                    //    {
-                    //        Console.SetCursorPosition(j, Threads[pcode].Row + 3);
-                    //        Console.Write(" ");
-                    //    }
-                    //    Console.BackgroundColor = back;
-                    //}
+                    lock (locker)
+                    {
+                        i++;
+                        Console.BackgroundColor = ConsoleColor.Cyan;
+                        for (int j = 0; j < HUNDRED; j++)
+                        {
+                            Console.SetCursorPosition(j, Threads[pcode].Row + 5);
+                            Console.Write(" ");
+                        }
+                        Console.BackgroundColor = ConsoleColor.Yellow;
+                        var length = Math.Floor((double)i / counties.Count * HUNDRED);
+                        for (int j = 0; j < length; j++)
+                        {
+                            Console.SetCursorPosition(j, Threads[pcode].Row + 3);
+                            Console.Write(" ");
+                        }
+                        Console.BackgroundColor = back;
+                    }
                 }
             else
                 Failure[Level.City].Add(url);
@@ -326,7 +327,6 @@ namespace AreaSpider
             try
             {
                 html = await HttpHelper.GetAsync(url);
-
             }
             catch (Exception)
             {
@@ -339,7 +339,7 @@ namespace AreaSpider
                 doc.DocumentNode.SelectNodes(
                     "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tr[@class='towntr']/td[position()=2]/a");
             var baseUrl = url.Substring(0, url.LastIndexOf('/') + 1);
-            int i = 0;
+            var i = 0;
             if (towns != null && towns.Count > 0)
                 foreach (var item in towns)
                 {
@@ -363,18 +363,18 @@ namespace AreaSpider
                     {
                         Failure[Level.Town].Add(area.Url);
                     }
-                    //lock (locker)
-                    //{
-                    //    i++;
-                    //    Console.BackgroundColor = ConsoleColor.Yellow;
-                    //    var length = Math.Floor((double)i / towns.Count * HUNDRED);
-                    //    for (int j = 0; j < length; j++)
-                    //    {
-                    //        Console.SetCursorPosition(j, Threads[pcode].Row + 5);
-                    //        Console.Write(" ");
-                    //    }
-                    //    Console.BackgroundColor = back;
-                    //}
+                    lock (locker)
+                    {
+                        i++;
+                        Console.BackgroundColor = ConsoleColor.Yellow;
+                        var length = Math.Floor((double)i / towns.Count * HUNDRED);
+                        for (int j = 0; j < length; j++)
+                        {
+                            Console.SetCursorPosition(j, Threads[pcode].Row + 5);
+                            Console.Write(" ");
+                        }
+                        Console.BackgroundColor = back;
+                    }
                 }
             else
                 Failure[Level.County].Add(url);

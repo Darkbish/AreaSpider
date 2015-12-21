@@ -18,8 +18,9 @@ namespace AreaSpider
             //string cocode = "441900";
             //string result = SpiderHelper.ExportCounties(pcode, ccode, cocode, "http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/2013/44/4420.html").Result;
             //File.WriteAllText($@"D:\{ccode}.txt", result);
-            string content = Read();
-            Write(content);
+            //string content = Read();
+            //Write(content);
+            Spider.Load().Wait();
         }
 
         static string Read()
