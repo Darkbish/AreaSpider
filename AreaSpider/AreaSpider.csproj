@@ -54,7 +54,6 @@
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Spider.cs" />
-    <Compile Include="SpiderHelper.cs" />
     <Compile Include="SpiderThread.cs" />
   </ItemGroup>
   <ItemGroup>

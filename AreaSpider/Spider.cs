@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Configuration;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -12,8 +13,6 @@ namespace AreaSpider
 {
     public static class Spider
     {
-        private static readonly IList<Area> Areas = new List<Area>();
-
         private const string XPATH =
             "/html/body/table[2]/tbody/tr[1]/td/table/tbody/tr[2]/td/table/tbody/tr/td/table/tr";
 
@@ -28,23 +27,30 @@ namespace AreaSpider
 
         public static async Task Load()
         {
-            await ParseHtml(INDEX_URL, Level.Province);
+            var area = new Area { Title = "Title", Code = "Code" };
+            Console.WindowWidth = Console.LargestWindowWidth * 3 / 4;
+            Console.WindowHeight = Console.LargestWindowHeight * 3 / 4;
+            await ParseHtml(INDEX_URL, area, Level.Province);
+            foreach (var item in Threads)
+            {
+                item.Value.Thread.Start();
+            }
             lock (Locker)
             {
-                while (Threads.Count > Finished)
+                while (Threads.Count > Finished || Threads.Any(d => d.Value.Finished < d.Value.SubThread.Count))
                 {
                     Monitor.Wait(Locker);
                 }
             }
             StringBuilder sb = new StringBuilder();
-            foreach (var item in Areas)
+            foreach (var item in area.Sub)
             {
                 sb.Append(item);
             }
-            File.WriteAllText(@"D:\areas.txt", sb.ToString());
+            File.WriteAllText(@"D:\areas.txt", sb.ToString(), Encoding.UTF8);
         }
 
-        private static void GenerateProgress(string title)
+        public static void GenerateProgress(string title)
         {
             Console.WriteLine(title);
             for (int i = 0; i < 3; i++)
@@ -72,10 +78,8 @@ namespace AreaSpider
             }
         }
 
-        private static async Task ParseHtml(string url, Level level)
+        public static async Task ParseHtml(string url, Area area, Level level)
         {
-            if (url == null)
-                return;
             var html = await HttpHelper.GetAsync(url);
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -84,15 +88,18 @@ namespace AreaSpider
             switch (level)
             {
                 case Level.Province:
-                    ParseProvince(nodes);
+                    ParseProvince(nodes, area);
                     break;
                 case Level.City:
-                    await ParseCommon(url, nodes, level);
+                case Level.County:
+                case Level.Town:
+                case Level.Village:
+                    await ParseCommon(url, nodes, area, level);
                     break;
             }
         }
 
-        private static void ParseProvince(IEnumerable<HtmlNode> nodes)
+        private static void ParseProvince(IEnumerable<HtmlNode> nodes, Area parent)
         {
             int row = 0;
             foreach (var node in nodes)
@@ -110,33 +117,30 @@ namespace AreaSpider
                         ParentUrl = INDEX_URL,
                         Url = INDEX_URL.Substring(0, INDEX_URL.LastIndexOf('/') + 1) + href
                     };
-                    Areas.Add(area);
+                    parent.Add(area);
+                    GenerateProgress(title);
                     var thread = new SpiderThread
                     {
                         Row = row + 1,
                         Title = title,
                         Thread = new Thread(async () =>
                         {
-                            await ParseHtml(area.Url, Level.City);
+                            await ParseHtml(area.Url, area, Level.City);
                             lock (Locker)
                             {
                                 Finished++;
-                                File.WriteAllText($@"D:\areas\{title}.txt", area.ToString(), Encoding.UTF8);
+                                //File.WriteAllText($@"D:\areas\{title}.txt", area.ToString(), Encoding.UTF8);
                                 Monitor.Pulse(Locker);
                             }
                         })
                     };
-                    thread.Thread.Start();
                     Threads.Add(code, thread);
-                    GenerateProgress(title);
                     row += 2;
-                    break;
                 }
-                break;
             }
         }
 
-        private static async Task ParseCommon(string url, IEnumerable<HtmlNode> nodes, Level level)
+        private static async Task ParseCommon(string url, IEnumerable<HtmlNode> nodes, Area parent, Level level)
         {
             var baseUrl = url.Substring(0, url.LastIndexOf('/') + 1);
             int index = 1;
@@ -144,9 +148,9 @@ namespace AreaSpider
             {
                 var td = node.SelectNodes("td");
                 string href = null;
-                string code = string.Empty;
-                string title = string.Empty;
-                if (td[0].HasChildNodes)
+                string code;
+                string title;
+                if (td[0].HasChildNodes && string.Equals(td[0].FirstChild.Name, "a", StringComparison.OrdinalIgnoreCase))
                 {
                     href = td[0].SelectSingleNode("a").Attributes["href"].Value;
                     code = Regex.Match(href, @"\d+\/(\d+)\.html").Groups[1].Value;
@@ -155,7 +159,7 @@ namespace AreaSpider
                 else
                 {
                     code = td[0].InnerText;
-                    title = td[1].InnerText;
+                    title = td.Count > 2 ? td[2].InnerText : td[1].InnerText;
                 }
                 var area = new Area
                 {
@@ -164,44 +168,51 @@ namespace AreaSpider
                     ParentUrl = url,
                     Url = href != null ? baseUrl + href : null
                 };
+                parent.Add(area);
+                if (area.Url == null)
+                    continue;
                 string province = code.Substring(0, 2);
-                Areas.Single(d => d.Code == province).Add(area, level);
-                int row = Threads[province].Row;
+                int? row = null;
+                if (Threads.ContainsKey(province))
+                    row = Threads[province]?.Row;
+                var step = 40;
+                var start = (int)(level - 1) * step + (int)(level - 1);
+                var max = (int)level * step + (int)(level - 1);
+                index++;
                 if (level == Level.City)
                 {
                     var thread = new Thread(async () =>
                     {
-                        await ParseHtml(area.Url, level + 1);
-                        lock (Locker)
-                        {
-                            Threads[province].Finished++;
-                            int end = (int)Math.Floor((double)Threads[province].Finished / nodes.Count() * 40);
-                            UpdateProgress(row, 0, end, ConsoleColor.Green);
-                            if (Threads[province].Finished < nodes.Count() - 1)
-                                UpdateProgress(row, 42, 82, ConsoleColor.Cyan);
-                        }
+                        await ParseHtml(area.Url, area, level + 1);
+                        if (row.HasValue)
+                            lock (Locker)
+                            {
+                                Threads[province].Finished++;
+                                CalcProgress(row.Value, Threads[province].Finished, start, max, nodes.Count());
+                                Monitor.Pulse(Locker);
+                            }
                     });
                     Threads[province].SubThread.Add(thread);
                     thread.Start();
                 }
                 else
                 {
-                    await ParseHtml(area.Url, level + 1);
-                    if (level == Level.County)
-                    {
-                        var end = (int)Math.Floor((double)index / nodes.Count() * 40);
-                        UpdateProgress(row, 42, end, ConsoleColor.Green);
-                        if (index < nodes.Count())
-                            UpdateProgress(row, 84, 124, ConsoleColor.Cyan);
-                    }
-                    else
-                    {
-                        var end = (int)Math.Floor((double)index / nodes.Count() * 40);
-                        UpdateProgress(row, 84, end, ConsoleColor.Green);
-                    }
+                    await ParseHtml(area.Url, area, level + 1);
+                    if (row.HasValue && (level == Level.County || level == Level.Town))
+                        CalcProgress(row.Value, index, start, max, nodes.Count(), level == Level.County);
                 }
-                index++;
             }
+        }
+
+        private static void CalcProgress(int row, int finished, int start, int max, int count, bool updateChild = true)
+        {
+            var end = start + (int)Math.Floor((double)finished / count * 40);
+            var step = 41;
+            if (end > max)
+                end = max;
+            UpdateProgress(row, start, end, ConsoleColor.Green);
+            if (finished < count && updateChild)
+                UpdateProgress(row, start + step, max + step, ConsoleColor.Cyan);
         }
     }
 }
